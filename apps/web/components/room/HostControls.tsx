@@ -4,7 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Play, SquareSquare, Loader2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
-import { RoomStatus, Round } from "@/types";
+import type { Round } from "@/types";
 
 export function HostControls({ 
   roomId, 

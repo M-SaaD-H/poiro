@@ -1,5 +1,4 @@
 import { Loader2, CheckCircle2, XCircle, Clock } from "lucide-react";
-import { JobStatus } from "@/types";
 
 export function JobStatusBadge({ status }: { status: "queued" | "running" | "completed" | "failed" | "timed_out" }) {
   switch (status) {
