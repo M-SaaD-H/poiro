@@ -16,6 +16,14 @@
     "dev": {
       "cache": false,
       "persistent": true
+    },
+    "api#dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "web#dev": {
+      "cache": false,
+      "persistent": true
     }
   }
 }
