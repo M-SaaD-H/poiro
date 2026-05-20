@@ -1,15 +1,19 @@
-"""Authentication router: register, login, and get current user."""
+"""Authentication router: register, login, and get current user.
+
+Auth (sign-up / sign-in) is delegated to Supabase Auth.
+On registration, a profile row is inserted into public.users using the UUID
+issued by Supabase so that our ORM models can reference it via foreign key.
+"""
 
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_user
 from app.auth.models import User
 from app.auth.schemas import LoginRequest, RegisterRequest, TokenResponse, UserResponse
-from app.auth.service import create_access_token, hash_password, verify_password
+from app.auth.service import login_with_supabase, register_with_supabase
 from app.database import get_session
 
 logger = logging.getLogger(__name__)
@@ -21,26 +25,23 @@ async def register(
     body: RegisterRequest,
     session: AsyncSession = Depends(get_session),
 ) -> TokenResponse:
-    """Register a new user account and return an access token."""
-    existing = await session.scalar(select(User).where(User.email == body.email))
-    if existing is not None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="An account with this email already exists.",
-        )
+    """Register a new user via Supabase Auth and create a public profile row."""
+    # 1. Create the identity in Supabase Auth (raises 409 on duplicate email).
+    user_id, access_token, refresh_token = register_with_supabase(body.email, body.password)
 
+    # 2. Insert the public profile row so our FK relationships work.
     user = User(
+        id=user_id,
         email=body.email,
-        hashed_password=hash_password(body.password),
         display_name=body.display_name,
     )
     session.add(user)
     await session.flush()
 
-    token = create_access_token(user.id)
-    logger.info("New user registered: %s", user.email)
+    logger.info("New user registered: %s (id=%s)", body.email, user_id)
     return TokenResponse(
-        access_token=token,
+        access_token=access_token,
+        refresh_token=refresh_token,
         user=UserResponse.model_validate(user),
     )
 
@@ -50,18 +51,23 @@ async def login(
     body: LoginRequest,
     session: AsyncSession = Depends(get_session),
 ) -> TokenResponse:
-    """Authenticate an existing user and return an access token."""
-    user = await session.scalar(select(User).where(User.email == body.email))
-    if user is None or not verify_password(body.password, user.hashed_password):
+    """Authenticate via Supabase Auth and return tokens + profile."""
+    # 1. Verify credentials with Supabase Auth.
+    user_id, access_token, refresh_token = login_with_supabase(body.email, body.password)
+
+    # 2. Fetch the public profile row.
+    user = await session.get(User, user_id)
+    if user is None:
+        # Supabase Auth succeeded but the profile is missing — shouldn't normally happen.
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password.",
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User profile not found. Please contact support.",
         )
 
-    token = create_access_token(user.id)
-    logger.info("User logged in: %s", user.email)
+    logger.info("User logged in: %s", body.email)
     return TokenResponse(
-        access_token=token,
+        access_token=access_token,
+        refresh_token=refresh_token,
         user=UserResponse.model_validate(user),
     )
 

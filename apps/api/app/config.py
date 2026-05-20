@@ -14,21 +14,35 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # Database
-    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/postgres"
+    # Supabase — direct Postgres URL for SQLAlchemy (asyncpg)
+    # Format: postgresql+asyncpg://postgres.[project-ref]:<password>@<host>:5432/postgres
+    supabase_db_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/postgres"
 
-    # Supabase
+    # Supabase project URL (e.g. https://abcxyz.supabase.co)
     supabase_url: str = "https://your-project.supabase.co"
-    supabase_anon_key: str = "your-anon-key"
-    supabase_service_role_key: str = "your-service-role-key"
+
+    # Publishable key — new-style sb_publishable_... (replaces legacy anon key)
+    # Safe to expose to the frontend/browser. Used to initialise the Supabase client.
+    supabase_publishable_key: str = "sb_publishable_..."
+
+    # Secret key — new-style sb_secret_... (replaces legacy service_role key)
+    # NEVER expose publicly. Used for admin/server-side Supabase operations.
+    supabase_secret_key: str = "sb_secret_..."
+
+    # JWKS URL for verifying Supabase-issued JWTs server-side.
+    # Defaults to <supabase_url>/auth/v1/.well-known/jwks.json.
+    # Only override if you use a custom auth domain.
+    supabase_jwks_url: str = ""
+
+    @property
+    def resolved_jwks_url(self) -> str:
+        """Return the effective JWKS URL, auto-derived from supabase_url if not set."""
+        if self.supabase_jwks_url:
+            return self.supabase_jwks_url
+        return f"{self.supabase_url.rstrip('/')}/auth/v1/.well-known/jwks.json"
 
     # Redis / ARQ
     redis_url: str = "redis://localhost:6379"
-
-    # JWT
-    secret_key: str = "changeme_use_openssl_rand_hex_32"
-    algorithm: str = "HS256"
-    access_token_expire_minutes: int = 10080  # 7 days
 
     # AI Provider
     ai_provider: Literal["openai", "mock"] = "mock"

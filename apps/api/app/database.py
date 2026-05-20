@@ -1,7 +1,8 @@
-"""SQLAlchemy async engine, session factory, and FastAPI dependency."""
+"""SQLAlchemy async engine, session factory, FastAPI dependency, and Supabase client singleton."""
 
 import logging
 from collections.abc import AsyncGenerator
+from functools import lru_cache
 
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
@@ -9,6 +10,8 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 from sqlalchemy.orm import DeclarativeBase
+from supabase import Client as SupabaseClient
+from supabase import create_client
 
 from app.config import get_settings
 
@@ -16,8 +19,12 @@ logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
+# ---------------------------------------------------------------------------
+# SQLAlchemy — pointed at Supabase Postgres via direct asyncpg connection
+# ---------------------------------------------------------------------------
+
 engine = create_async_engine(
-    settings.database_url,
+    settings.supabase_db_url,
     echo=settings.debug,
     pool_pre_ping=True,
     pool_size=10,
@@ -50,3 +57,17 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
             raise
         finally:
             await session.close()
+
+
+# ---------------------------------------------------------------------------
+# Supabase client — used for Auth operations (sign_up, sign_in_with_password)
+#
+# Uses the publishable key (sb_publishable_...) — the new-style replacement for
+# the legacy anon key. This is safe for auth operations because the client
+# library manages session tokens and we enforce our own server-side authz.
+# ---------------------------------------------------------------------------
+
+@lru_cache(maxsize=1)
+def get_supabase() -> SupabaseClient:
+    """Return a cached Supabase client singleton (publishable key, for auth)."""
+    return create_client(settings.supabase_url, settings.supabase_publishable_key)

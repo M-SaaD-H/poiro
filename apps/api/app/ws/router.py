@@ -7,7 +7,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 from jose import JWTError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.service import decode_access_token
+from app.auth.service import verify_supabase_token
 from app.database import AsyncSessionLocal
 from app.rooms.service import get_room_state
 from app.ws.manager import connection_manager
@@ -42,8 +42,7 @@ async def websocket_room(
         return
 
     try:
-        user_id_str = decode_access_token(token)
-        _user_id = uuid.UUID(user_id_str)
+        _user_id = verify_supabase_token(token)
     except (JWTError, ValueError) as exc:
         logger.warning("WS auth failed for room %s: %s", room_id, exc)
         await websocket.close(code=_CLOSE_CODE_POLICY_VIOLATION, reason="Invalid authentication token.")

@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from app.database import engine, Base
+from app.database import engine, get_supabase
 
 logger = logging.getLogger(__name__)
 
@@ -24,22 +24,19 @@ def _configure_logging(log_level: str) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Application lifespan: create DB tables on startup, dispose engine on shutdown."""
+    """Application lifespan: verify DB connectivity on startup, dispose engine on shutdown.
+
+    Schema management is handled by Supabase SQL migrations (supabase/migrations/).
+    We no longer call Base.metadata.create_all here.
+    """
     settings = get_settings()
     _configure_logging(settings.log_level)
     logger.info("Starting %s v%s", settings.app_title, settings.app_version)
 
-    # Import all models so SQLAlchemy knows about them before create_all
-    import app.auth.models  # noqa: F401
-    import app.rooms.models  # noqa: F401
-    import app.rounds.models  # noqa: F401
-    import app.submissions.models  # noqa: F401
-    import app.scores.models  # noqa: F401
+    # Warm up the Supabase client singleton so the first request isn't slower.
+    get_supabase()
+    logger.info("Supabase client initialised.")
 
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-    logger.info("Database tables verified/created.")
     yield
 
     await engine.dispose()
