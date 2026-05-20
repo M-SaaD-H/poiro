@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-export function middleware(request: NextRequest) {
+export default function proxy(request: NextRequest) {
   // We check for a token in cookies or headers (for simplicity, we'll assume the frontend sets a cookie 'poiro_token')
   const token = request.cookies.get('poiro_token')?.value;
 
