@@ -1,10 +1,32 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
 
-@layer base {
-  :root {
-    --background: #0a0a0a;
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+
+  --destructive: oklch(0.577 0.245 27.325);
+
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+}
+
+.dark {
+  --background: #0a0a0a;
   --foreground: #ededed;
 
   --card: oklch(0.15 0 0);
@@ -26,14 +48,117 @@
 
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
-  }
 }
 
-@layer base {
-  * {
-    @apply border-border;
-  }
-  body {
-    @apply bg-background text-foreground;
-  }
+@theme inline {
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --font-instrument-serif: var(--font-instrument-serif);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+
+  --color-destructive: var(--destructive);
+
+  --color-border: var(--border);
+  --color-input: var(--input);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+  overflow-y: scroll;
+}
+
+::selection {
+  background-color: var(--color-primary);
+  color: var(--color-primary-foreground);
+}
+
+.blog-article-header {
+  margin-bottom: 2rem;
+}
+
+.blog-article-header h1 {
+  font-size: clamp(2rem, 3vw, 3rem);
+  line-height: 1.05;
+  margin-bottom: 0.75rem;
+}
+
+.blog-article-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 0.95rem;
+  margin-bottom: 1rem;
+}
+
+.blog-article p {
+  line-height: 1.5;
+  margin: 1.2rem 0;
+}
+
+.blog-inline-code,
+.blog-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  border-radius: 0.35rem;
+  font-size: 0.95em;
+}
+
+.blog-inline-code {
+  background: rgba(148, 163, 184, 0.18);
+  padding: 0.15rem 0.3rem;
+}
+
+.blog-code-block {
+  background: #1C1F23;
+  color: #e2e8f0;
+  padding: 1.25rem;
+  border-radius: 1rem;
+  overflow-x: auto;
+  margin: 1.75rem 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 0.95rem;
+  line-height: 1.6;
+  white-space: pre;
+}
+
+.blog-code-block code {
+  display: block;
+  padding: 0;
+  margin: 0;
+}
+
+.blog-code-block::-webkit-scrollbar {
+  height: 0.5rem;
+}
+
+.blog-code-block::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+}
+
+.blog-quote {
+  border-left: 4px solid rgba(148, 163, 184, 0.65);
+  padding: 1rem 1.25rem;
+  margin: 1.75rem 0;
+  color: rgba(226, 232, 240, 0.9);
+  background: rgba(148, 163, 184, 0.08);
 }
