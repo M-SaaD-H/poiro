@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -21,14 +21,19 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
-import { Separator } from "@/components/ui/separator";
 
 export default function DashboardPage() {
   const { user, loading, logout } = useAuth();
   const router = useRouter();
-  
+
   const [isCreating, setIsCreating] = useState(false);
   const [isJoining, setIsJoining] = useState(false);
+
+  useEffect(() => {
+    if (!user) {
+      router.push("/login");
+    }
+  }, [user]);
 
   const createForm = useForm<CreateRoomFormData>({
     resolver: zodResolver(createRoomSchema),
@@ -93,11 +98,11 @@ export default function DashboardPage() {
     <div className="min-h-screen bg-zinc-950 text-zinc-50 p-6">
       <div className="max-w-4xl mx-auto space-y-8">
         <header className="flex justify-between items-center py-4">
-          <h1 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-blue-400 to-indigo-400 bg-clip-text text-transparent">Poiro</h1>
+          <h1 className="text-3xl font-bold tracking-tight text-sans">Poiro</h1>
           <div className="flex items-center gap-4">
-            <span className="text-zinc-400 text-sm">Welcome, {user?.display_name}</span>
-            <Button variant="outline" size="sm" onClick={handleLogout} className="border-zinc-800 hover:bg-zinc-800">
-              <LogOut className="mr-2 h-4 w-4" />
+            <span className="text-sm">Welcome, {user?.display_name}</span>
+            <Button variant="outline" size={"sm"} onClick={handleLogout} className="text-xs">
+              <LogOut className="h-4 w-4" />
               Sign Out
             </Button>
           </div>
@@ -107,7 +112,7 @@ export default function DashboardPage() {
           <Card className="bg-zinc-900 border-zinc-800">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <Plus className="h-5 w-5 text-indigo-400" />
+                <Plus className="h-5 w-5" />
                 Create a Battle Room
               </CardTitle>
               <CardDescription className="text-zinc-400">
@@ -147,7 +152,7 @@ export default function DashboardPage() {
                       </FormItem>
                     )}
                   />
-                  <Button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 text-white" disabled={isCreating}>
+                  <Button type="submit" className="w-full" disabled={isCreating}>
                     {isCreating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : "Create Room"}
                   </Button>
                 </form>
@@ -158,7 +163,7 @@ export default function DashboardPage() {
           <Card className="bg-zinc-900 border-zinc-800">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <LogIn className="h-5 w-5 text-blue-400" />
+                <LogIn className="h-5 w-5" />
                 Join a Battle Room
               </CardTitle>
               <CardDescription className="text-zinc-400">
@@ -186,7 +191,7 @@ export default function DashboardPage() {
                       </FormItem>
                     )}
                   />
-                  <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white" disabled={isJoining}>
+                  <Button type="submit" className="w-full" disabled={isJoining}>
                     {isJoining ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : "Join Room"}
                   </Button>
                 </form>
