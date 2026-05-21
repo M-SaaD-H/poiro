@@ -8,6 +8,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Integer,
     String,
     UniqueConstraint,
     func,
@@ -31,6 +32,7 @@ class Room(Base):
     status: Mapped[RoomStatus] = mapped_column(
         Enum(RoomStatus, name="roomstatus"), default=RoomStatus.waiting, nullable=False
     )
+    max_rounds: Mapped[int] = mapped_column(Integer, default=3, nullable=False, server_default="3")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

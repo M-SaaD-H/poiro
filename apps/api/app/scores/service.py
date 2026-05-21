@@ -96,3 +96,36 @@ async def get_round_scores(round_id: uuid.UUID, session: AsyncSession) -> list[S
     """Return all scores for a given round."""
     result = await session.scalars(select(Score).where(Score.round_id == round_id))
     return [ScoreResponse.model_validate(s) for s in result.all()]
+
+
+async def get_room_leaderboard(room_id: uuid.UUID, session: AsyncSession) -> list[dict]:
+    """Aggregate scores per participant across all rounds in a room, ranked by total points."""
+    from sqlalchemy import func as sql_func
+    from app.rooms.models import Participant
+    from app.auth.models import User
+
+    stmt = (
+        select(
+            Participant.id.label("participant_id"),
+            User.display_name.label("display_name"),
+            Participant.is_eliminated.label("is_eliminated"),
+            sql_func.coalesce(sql_func.sum(Score.points), 0).label("total_points"),
+        )
+        .select_from(Participant)
+        .join(User, User.id == Participant.user_id)
+        .outerjoin(Score, Score.participant_id == Participant.id)
+        .where(Participant.room_id == room_id)
+        .group_by(Participant.id, User.display_name, Participant.is_eliminated)
+        .order_by(sql_func.coalesce(sql_func.sum(Score.points), 0).desc())
+    )
+    result = await session.execute(stmt)
+    rows = result.all()
+    return [
+        {
+            "participant_id": str(row.participant_id),
+            "display_name": row.display_name,
+            "total_points": row.total_points,
+            "is_eliminated": row.is_eliminated,
+        }
+        for row in rows
+    ]

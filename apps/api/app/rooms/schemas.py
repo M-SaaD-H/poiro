@@ -11,6 +11,7 @@ from app.enums import RoomStatus
 class CreateRoomRequest(BaseModel):
     title: str = Field(min_length=3, max_length=200)
     challenge_prompt: str = Field(min_length=10, max_length=2000)
+    max_rounds: int = Field(default=3, ge=1, le=10)
 
 
 class ParticipantResponse(BaseModel):
@@ -31,6 +32,7 @@ class RoomResponse(BaseModel):
     challenge_prompt: str
     host_id: uuid.UUID
     status: RoomStatus
+    max_rounds: int
     created_at: datetime
 
     model_config = {"from_attributes": True}

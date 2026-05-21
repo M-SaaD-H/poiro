@@ -208,3 +208,35 @@ async def get_room_state(room_id: uuid.UUID, session: AsyncSession) -> RoomState
         submissions=submissions,
         jobs=jobs,
     )
+
+
+async def leave_room(
+    room_id: uuid.UUID,
+    user_id: uuid.UUID,
+    session: AsyncSession,
+) -> uuid.UUID:
+    """Remove a participant from a room. Returns the participant id for broadcast."""
+    participant = await session.scalar(
+        select(Participant).where(
+            Participant.room_id == room_id,
+            Participant.user_id == user_id,
+        )
+    )
+    if participant is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="You are not a participant in this room.")
+
+    participant_id = participant.id
+    await session.delete(participant)
+    await session.flush()
+
+    # If no participants remain, revert room to waiting
+    remaining = await session.scalar(
+        select(Participant).where(Participant.room_id == room_id)
+    )
+    if remaining is None:
+        room = await session.get(Room, room_id)
+        if room and room.status == RoomStatus.active:
+            room.status = RoomStatus.waiting
+
+    logger.info("User %s left room %s", user_id, room_id)
+    return participant_id

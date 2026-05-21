@@ -33,17 +33,39 @@ async def start_round(
             detail="Room must be active before starting a round.",
         )
 
+    # Auto-complete any round currently in scoring phase so the host can
+    # start the next round directly from the ScoringPanel.
+    scoring_round = await session.scalar(
+        select(Round).where(
+            Round.room_id == room_id,
+            Round.status == RoundStatus.scoring,
+        )
+    )
+    if scoring_round is not None:
+        scoring_round.status = RoundStatus.completed
+        await session.flush()
+
     # Ensure no currently active round
     active_count = await session.scalar(
         select(func.count(Round.id)).where(
             Round.room_id == room_id,
-            Round.status.in_([RoundStatus.active, RoundStatus.scoring]),
+            Round.status == RoundStatus.active,
         )
     )
     if active_count and active_count > 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="A round is already active.",
+        )
+
+    # Enforce max_rounds cap — count all rounds (including just-completed one)
+    total_count = await session.scalar(
+        select(func.count(Round.id)).where(Round.room_id == room_id)
+    )
+    if total_count is not None and total_count >= room.max_rounds:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"All {room.max_rounds} rounds have already been played.",
         )
 
     # Determine next round number
@@ -88,3 +110,21 @@ async def end_round(
     await session.flush()
     logger.info("Round %s ended", round_id)
     return RoundResponse.model_validate(round_)
+
+
+async def complete_room(
+    room_id: uuid.UUID,
+    host_id: uuid.UUID,
+    session: AsyncSession,
+) -> None:
+    """Mark a room as completed (host only). Called after the final round is scored."""
+    room = await session.get(Room, room_id)
+    if room is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Room not found.")
+    if room.host_id != host_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the host can complete the room.")
+    if room.status == RoomStatus.completed:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Room is already completed.")
+    room.status = RoomStatus.completed
+    await session.flush()
+    logger.info("Room %s marked as completed", room_id)

@@ -9,7 +9,9 @@ from app.auth.dependencies import get_current_user, get_current_user_id
 from app.auth.models import User
 from app.database import get_session
 from app.rooms.schemas import CreateRoomRequest, ParticipantResponse, RoomDetailResponse, RoomResponse, RoomStateResponse
-from app.rooms.service import create_room, get_room_by_code, get_room_state, join_room
+from app.rooms.service import create_room, get_room_by_code, get_room_state, join_room, leave_room
+from app.rounds.service import complete_room as complete_room_service
+from app.ws.manager import connection_manager
 
 router = APIRouter(prefix="/rooms", tags=["rooms"])
 
@@ -42,7 +44,32 @@ async def join_room_endpoint(
 ) -> ParticipantResponse:
     """Join a room as a participant using its join code."""
     participant = await join_room(code, current_user.id, session)
+    await session.commit()
+
+    # Broadcast real-time participant:joined event to all connected clients in the room
+    await connection_manager.broadcast_to_room(
+        str(participant.room_id),
+        "participant:joined",
+        participant.model_dump(mode="json"),
+    )
+
     return participant
+
+
+@router.delete("/{room_id}/leave", status_code=status.HTTP_204_NO_CONTENT)
+async def leave_room_endpoint(
+    room_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    """Remove the current user from a room and notify all clients."""
+    participant_id = await leave_room(room_id, current_user.id, session)
+    await session.commit()
+    await connection_manager.broadcast_to_room(
+        str(room_id),
+        "participant:left",
+        {"participant_id": str(participant_id)},
+    )
 
 
 @router.get("/{room_id}/state", response_model=RoomStateResponse)
@@ -63,7 +90,6 @@ async def start_round_endpoint(
 ) -> dict:
     """Start a new round in the room (host only)."""
     from app.rounds.service import start_round
-    from app.ws.manager import connection_manager
 
     round_ = await start_round(room_id, current_user.id, session)
     await session.commit()
@@ -73,3 +99,30 @@ async def start_round_endpoint(
         {"round_id": str(round_.id), "round_number": round_.round_number},
     )
     return round_.model_dump(mode="json")
+
+
+@router.post("/{room_id}/complete", status_code=status.HTTP_204_NO_CONTENT, tags=["rooms"])
+async def complete_room_endpoint(
+    room_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    """Mark a room as completed and broadcast to all clients (host only)."""
+    await complete_room_service(room_id, current_user.id, session)
+    await session.commit()
+    await connection_manager.broadcast_to_room(
+        str(room_id),
+        "room:completed",
+        {"room_id": str(room_id)},
+    )
+
+
+@router.get("/{room_id}/leaderboard", tags=["rooms"])
+async def get_leaderboard_endpoint(
+    room_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _: uuid.UUID = Depends(get_current_user_id),
+) -> list[dict]:
+    """Return aggregated scores per participant across all rounds in a room."""
+    from app.scores.service import get_room_leaderboard
+    return await get_room_leaderboard(room_id, session)

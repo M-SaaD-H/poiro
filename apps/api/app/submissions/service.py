@@ -89,9 +89,28 @@ async def create_submission(
     await session.flush()
 
     logger.info("Submission %s created, job %s queued", submission.id, job.id)
+
+    job_response = GenerationJobResponse(
+        id=job.id,
+        submission_id=job.submission_id,
+        status=job.status,
+        error_message=job.error_message,
+        enqueued_at=job.enqueued_at,
+        started_at=job.started_at,
+        completed_at=job.completed_at,
+        retry_count=job.retry_count,
+    )
     return SubmissionWithJobResponse(
-        submission=SubmissionResponse.model_validate(submission),
-        job=GenerationJobResponse.model_validate(job),
+        submission=SubmissionResponse(
+            id=submission.id,
+            round_id=submission.round_id,
+            participant_id=submission.participant_id,
+            prompt=submission.prompt,
+            generated_output=submission.generated_output,
+            created_at=submission.created_at,
+            generation_job=job_response,
+        ),
+        job=job_response,
     )
 
 

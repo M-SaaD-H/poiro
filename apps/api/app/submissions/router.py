@@ -1,5 +1,6 @@
 """Submissions router: submit prompts, fetch results, retry failed jobs."""
 
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, status
@@ -8,10 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.dependencies import get_current_user, get_current_user_id
 from app.auth.models import User
 from app.database import get_session
+from app.rounds.models import Round
 from app.submissions.schemas import CreateSubmissionRequest, GenerationJobResponse, SubmissionResponse, SubmissionWithJobResponse
 from app.submissions.service import create_submission, get_submission, retry_job
 
 router = APIRouter(tags=["submissions"])
+logger = logging.getLogger(__name__)
 
 
 @router.post(
@@ -33,7 +36,7 @@ async def submit_prompt(
     await session.commit()
 
     # Broadcast submission created event
-    round_ = await session.get(__import__("app.rounds.models", fromlist=["Round"]).Round, round_id)
+    round_ = await session.get(Round, round_id)
     if round_ is not None:
         await connection_manager.broadcast_to_room(
             str(round_.room_id),
@@ -41,20 +44,23 @@ async def submit_prompt(
             {
                 "submission_id": str(result.submission.id),
                 "participant_id": str(result.submission.participant_id),
+                "prompt": result.submission.prompt,
             },
         )
-        # Enqueue ARQ job
+        # Enqueue ARQ job — wrapped so a missing Redis doesn't crash the request
         from app.config import get_settings
         settings = get_settings()
-        redis = await arq.create_pool(arq.connections.RedisSettings.from_dsn(settings.redis_url))
-        await redis.enqueue_job("run_generation_job", str(result.job.id))
-        await redis.aclose()
-
-        await connection_manager.broadcast_to_room(
-            str(round_.room_id),
-            "job:queued",
-            {"job_id": str(result.job.id), "submission_id": str(result.submission.id)},
-        )
+        try:
+            redis = await arq.create_pool(arq.connections.RedisSettings.from_dsn(settings.redis_url))
+            await redis.enqueue_job("run_generation_job", str(result.job.id))
+            await redis.aclose()
+            await connection_manager.broadcast_to_room(
+                str(round_.room_id),
+                "job:queued",
+                {"job_id": str(result.job.id), "submission_id": str(result.submission.id)},
+            )
+        except Exception as exc:
+            logger.warning("Failed to enqueue generation job %s: %s", result.job.id, exc)
 
     return result
 
