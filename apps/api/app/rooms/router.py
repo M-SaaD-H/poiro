@@ -127,15 +127,23 @@ async def complete_room_endpoint(
     room_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
+    early: bool = False,
 ) -> None:
-    """Mark a room as completed and broadcast to all clients (host only)."""
+    """Mark a room as completed and broadcast to all clients (host only).
+
+    Args:
+        early: When True the host is force-closing before all rounds finish.
+               When False (default) all rounds played naturally.
+               Clients use this flag to decide whether to show the leaderboard.
+    """
     await complete_room_service(room_id, current_user.id, session)
     # session.commit() owned by get_session
     await connection_manager.broadcast_to_room(
         str(room_id),
         "room:completed",
-        {"room_id": str(room_id)},
+        {"room_id": str(room_id), "early": early},
     )
+
 
 
 @router.get("/{room_id}/leaderboard", tags=["rooms"])

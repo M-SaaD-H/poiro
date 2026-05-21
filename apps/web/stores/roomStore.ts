@@ -9,6 +9,7 @@ interface RoomState {
   jobs: Record<string, GenerationJob>;
   scores: Score[];
   connected: boolean;
+  earlyClose: boolean;
 
   setRoomState: (snapshot: RoomSnapshot) => void;
   applyEvent: (event: WSEvent) => void;
@@ -24,6 +25,7 @@ export const useRoomStore = create<RoomState>((set) => ({
   jobs: {},
   scores: [],
   connected: false,
+  earlyClose: false,
 
   setConnected: (connected) => set({ connected }),
 
@@ -106,6 +108,8 @@ export const useRoomStore = create<RoomState>((set) => ({
       }
 
       case "submission:created": {
+        // Guard against duplicate events (e.g. WS reconnect replay)
+        if (state.submissions.some(s => s.id === event.data.submission_id)) return state;
         const newSubmission: Submission = {
           id: event.data.submission_id,
           round_id: state.activeRound?.id || "",
@@ -214,6 +218,7 @@ export const useRoomStore = create<RoomState>((set) => ({
       case "room:completed": {
         return {
           room: state.room ? { ...state.room, status: "completed" } : state.room,
+          earlyClose: Boolean(event.data.early),
         };
       }
 
@@ -229,5 +234,6 @@ export const useRoomStore = create<RoomState>((set) => ({
     jobs: {},
     scores: [],
     connected: false,
+    earlyClose: false,
   })
 }));

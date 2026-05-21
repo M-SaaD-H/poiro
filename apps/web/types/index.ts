@@ -90,4 +90,4 @@ export type WSEvent =
   | { event: "job:failed"; data: { job_id: string; error_message: string } }
   | { event: "job:timed_out"; data: { job_id: string } }
   | { event: "score:submitted"; data: { participant_id: string; points: number; is_eliminated: boolean } }
-  | { event: "room:completed"; data: { room_id: string } };
+  | { event: "room:completed"; data: { room_id: string; early?: boolean } };
