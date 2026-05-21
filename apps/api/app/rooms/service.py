@@ -151,7 +151,31 @@ async def join_room(
     )
 
 
-async def get_room_state(room_id: uuid.UUID, session: AsyncSession) -> RoomStateResponse:
+async def get_room_state_by_code(code: str, session: AsyncSession) -> "RoomStateResponse":
+    """Build the full room state snapshot for a room identified by join code.
+
+    Avoids the frontend pattern of two serial HTTP calls (GET /rooms/{code}
+    then GET /rooms/{id}/state) by doing a single DB query keyed on the code.
+    """
+    from app.rounds.schemas import RoundResponse
+    from app.submissions.schemas import GenerationJobResponse, SubmissionResponse
+
+    stmt = (
+        select(Room)
+        .where(Room.code == code.upper())
+        .options(
+            selectinload(Room.participants).selectinload(Participant.user),
+            selectinload(Room.rounds),
+        )
+    )
+    room = await session.scalar(stmt)
+    if room is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Room not found.")
+
+    return await _build_room_state_response(room, session)
+
+
+async def get_room_state(room_id: uuid.UUID, session: AsyncSession) -> "RoomStateResponse":
     """Build the full room state snapshot used for WS hydration."""
     from app.rounds.schemas import RoundResponse
     from app.submissions.schemas import GenerationJobResponse, SubmissionResponse
@@ -167,6 +191,14 @@ async def get_room_state(room_id: uuid.UUID, session: AsyncSession) -> RoomState
     room = await session.scalar(stmt)
     if room is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Room not found.")
+
+    return await _build_room_state_response(room, session)
+
+
+async def _build_room_state_response(room: Room, session: AsyncSession) -> "RoomStateResponse":
+    """Shared helper: given a loaded Room ORM object, build the state snapshot."""
+    from app.rounds.schemas import RoundResponse
+    from app.submissions.schemas import GenerationJobResponse, SubmissionResponse
 
     # Active round
     active_round: Round | None = next(

@@ -9,7 +9,7 @@ from app.auth.dependencies import get_current_user, get_current_user_id
 from app.auth.models import User
 from app.database import get_session
 from app.rooms.schemas import CreateRoomRequest, ParticipantResponse, RoomDetailResponse, RoomResponse, RoomStateResponse
-from app.rooms.service import create_room, get_room_by_code, get_room_state, join_room, leave_room
+from app.rooms.service import create_room, get_room_by_code, get_room_state, get_room_state_by_code, join_room, leave_room
 from app.rounds.service import complete_room as complete_room_service
 from app.ws.manager import connection_manager
 
@@ -76,6 +76,21 @@ async def leave_room_endpoint(
         "participant:left",
         {"participant_id": str(participant_id)},
     )
+
+
+@router.get("/{code}/state", response_model=RoomStateResponse)
+async def get_room_state_by_code_endpoint(
+    code: str,
+    session: AsyncSession = Depends(get_session),
+    _: uuid.UUID = Depends(get_current_user_id),
+) -> RoomStateResponse:
+    """Return the full room state snapshot by join code.
+
+    Combines the GET /rooms/{code} + GET /rooms/{id}/state calls into one
+    round-trip. Used by the frontend on initial page load to open the WS
+    connection faster.
+    """
+    return await get_room_state_by_code(code, session)
 
 
 @router.get("/{room_id}/state", response_model=RoomStateResponse)
