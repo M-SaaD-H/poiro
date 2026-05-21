@@ -46,31 +46,46 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Shared ARQ Redis pool — routers read from app.state.redis instead of
     # opening a new pool on every request.
-    redis_settings = arq.connections.RedisSettings.from_dsn(settings.redis_url)
-    app.state.redis = await arq.create_pool(redis_settings)
-    logger.info("ARQ Redis pool initialised.")
+    # If Redis is unavailable at startup the API still starts; job enqueuing
+    # and realtime worker broadcasts degrade gracefully until Redis recovers.
+    app.state.redis = None
+    pubsub_task = None
+    try:
+        redis_settings = arq.connections.RedisSettings.from_dsn(settings.redis_url)
+        app.state.redis = await arq.create_pool(redis_settings)
+        logger.info("ARQ Redis pool initialised.")
 
-    # Background Pub/Sub listener — receives events published by the ARQ worker
-    # (separate process) and fans them out to in-process WebSocket connections.
-    from app.ws.pubsub import pubsub_listener
-    pubsub_task = asyncio.create_task(
-        pubsub_listener(settings.redis_url),
-        name="pubsub_listener",
-    )
-    logger.info("Pub/Sub listener task started.")
+        # Background Pub/Sub listener — receives events published by the ARQ
+        # worker (separate process) and fans them out to in-process WebSocket
+        # connections.
+        from app.ws.pubsub import pubsub_listener
+        pubsub_task = asyncio.create_task(
+            pubsub_listener(settings.redis_url),
+            name="pubsub_listener",
+        )
+        logger.info("Pub/Sub listener task started.")
+    except Exception as exc:
+        logger.warning(
+            "Redis unavailable at startup (%s). Job queueing and realtime worker "
+            "broadcasts are disabled until Redis is reachable. "
+            "Start Redis and restart the server to restore full functionality.",
+            exc,
+        )
 
     yield
 
     # ── Shutdown ──────────────────────────────────────────────────────────────
-    pubsub_task.cancel()
-    try:
-        await pubsub_task
-    except asyncio.CancelledError:
-        pass
-    logger.info("Pub/Sub listener stopped.")
+    if pubsub_task is not None:
+        pubsub_task.cancel()
+        try:
+            await pubsub_task
+        except asyncio.CancelledError:
+            pass
+        logger.info("Pub/Sub listener stopped.")
 
-    await app.state.redis.aclose()
-    logger.info("ARQ Redis pool closed.")
+    if app.state.redis is not None:
+        await app.state.redis.aclose()
+        logger.info("ARQ Redis pool closed.")
 
     await engine.dispose()
     logger.info("Database engine disposed. Shutdown complete.")

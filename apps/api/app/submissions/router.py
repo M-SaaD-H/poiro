@@ -47,9 +47,13 @@ async def submit_prompt(
             },
         )
         # Enqueue ARQ job via the shared app-level Redis pool.
-        # Wrapped so a transient Redis hiccup doesn't crash the request.
+        # Wrapped so a transient Redis hiccup, or Redis being unavailable at
+        # startup, doesn't crash the request (job is persisted in DB, but
+        # won't be processed until Redis is available and the server restarts).
         try:
             redis = request.app.state.redis
+            if redis is None:
+                raise RuntimeError("Redis pool not initialised (Redis unavailable at startup)")
             await redis.enqueue_job("run_generation_job", str(result.job.id))
             await connection_manager.broadcast_to_room(
                 str(round_.room_id),
@@ -90,6 +94,9 @@ async def retry_job_endpoint(
 
     # Use app-level Redis pool — no per-request pool creation
     redis = request.app.state.redis
+    if redis is None:
+        logger.warning("Redis unavailable — job %s reset to queued but not enqueued.", job_id)
+        return job_response
     await redis.enqueue_job("run_generation_job", str(job_id))
 
     # Broadcast job:queued so all room clients immediately reflect the retry
