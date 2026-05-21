@@ -112,6 +112,66 @@ async def end_round(
     return RoundResponse.model_validate(round_)
 
 
+async def auto_end_round_if_all_submitted(
+    round_id: uuid.UUID,
+    session: AsyncSession,
+) -> RoundResponse | None:
+    """Auto-transition a round to scoring when every non-eliminated participant
+    has submitted.
+
+    Returns the updated RoundResponse if the round was ended, or None if there
+    are still outstanding submissions. Safe to call multiple times — a no-op if
+    the round is already in scoring/completed status.
+
+    This is an *internal* helper — it skips the host auth check because it is
+    triggered by a participant action (submitting), not a host action.
+    """
+    from app.rooms.models import Participant
+    from app.submissions.models import Submission
+    from sqlalchemy import func
+
+    round_ = await session.get(Round, round_id)
+    if round_ is None or round_.status != RoundStatus.active:
+        return None
+
+    # Count non-eliminated participants in the room
+    eligible_count = await session.scalar(
+        select(func.count(Participant.id)).where(
+            Participant.room_id == round_.room_id,
+            Participant.is_eliminated.is_(False),
+        )
+    )
+
+    # Count submissions for this round
+    submitted_count = await session.scalar(
+        select(func.count(Submission.id)).where(
+            Submission.round_id == round_id,
+        )
+    )
+
+    if eligible_count is None or submitted_count is None:
+        return None
+
+    if submitted_count < eligible_count:
+        # Still waiting for more submissions
+        logger.debug(
+            "Round %s: %d/%d submitted — not auto-ending yet",
+            round_id, submitted_count, eligible_count,
+        )
+        return None
+
+    # All in — transition to scoring
+    round_.status = RoundStatus.scoring
+    round_.ended_at = datetime.now(timezone.utc)
+    await session.flush()
+    logger.info(
+        "Round %s auto-ended: all %d participant(s) submitted",
+        round_id, submitted_count,
+    )
+    return RoundResponse.model_validate(round_)
+
+
+
 async def complete_room(
     room_id: uuid.UUID,
     host_id: uuid.UUID,

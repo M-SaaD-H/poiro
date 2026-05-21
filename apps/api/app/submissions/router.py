@@ -63,6 +63,17 @@ async def submit_prompt(
         except Exception as exc:
             logger.warning("Failed to enqueue generation job %s: %s", result.job.id, exc)
 
+        # ── Auto-end the round when every non-eliminated participant has submitted ──
+        from app.rounds.service import auto_end_round_if_all_submitted
+        ended_round = await auto_end_round_if_all_submitted(round_id, session)
+        if ended_round is not None:
+            await connection_manager.broadcast_to_room(
+                str(round_.room_id),
+                "round:ended",
+                {"round_id": str(ended_round.id)},
+            )
+            logger.info("Round %s auto-ended via all-submitted trigger", ended_round.id)
+
     return result
 
 
