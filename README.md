@@ -151,23 +151,23 @@ Generation tasks are handled by a finite state machine managed by ARQ:
 ## 8. Failure Handling
 
 - **Job Failures**: If the AI provider fails or times out (30s limit), the job transitions to `failed` or `timed_out`. The frontend displays a "Retry" button allowing the participant to re-enqueue the job.
-- **WS Disconnects**: If the WebSocket drops, the `useWebSocket` hook (or a future auto-reconnect wrapper) handles it. Next.js gracefully falls back to the last known state. Upon manual refresh, the full state is re-fetched.
+- **WS Disconnects**: If the WebSocket drops, the `useWebSocket` hook automatically reconnects with exponential backoff (500ms → 30s cap). On reconnect the server re-sends `room:state`, fully re-hydrating the client without a page reload.
 - **Invalid Prompts**: Validated deeply by Zod on the frontend, and Pydantic on the backend.
 
 ---
 
 ## 9. Known Limitations
 
-- **Scalability of WebSockets**: The current `ConnectionManager` is in-memory. If deploying multiple FastAPI pods, a Redis Pub/Sub backplane is required to sync WS events across instances.
-- **Simple JWT Auth**: Custom JWT implementation is used. Supabase Auth (as initially requested) was swapped for a native FastAPI+SQLite/Postgres JWT flow for simplicity in rapid prototyping, requiring custom Next.js middleware handling via cookies.
+- **Scalability of WebSockets**: The current `ConnectionManager` is in-memory. For multi-pod horizontal scaling, the Redis Pub/Sub backplane (`ws/pubsub.py`) introduced here is a prerequisite step.
+- **Supabase Auth (JWT)**: Authentication is handled by Supabase Auth. The API verifies JWTs by fetching the project's JWKS endpoint (`/auth/v1/.well-known/jwks.json`), validating the asymmetric signature (ES256/RS256) and `role: authenticated` claim. No custom JWT secret is used.
 - **Single Active Round**: The system assumes strict linear progression. You cannot run multiple rounds concurrently in the same room.
 
 ---
 
 ## 10. What I'd Improve With More Time
 
-1. **Redis Pub/Sub for WebSockets**: To support multi-pod horizontal scaling.
-2. **Robust Reconnection Logic**: Add exponential backoff for WebSocket drops and automatic REST re-sync on reconnect.
-3. **Spectator Mode**: Allow non-logged-in users to view rooms via a read-only WebSocket connection.
-4. **Enhanced UI Animations**: Add Framer Motion for smoother transitions when jobs complete or participants are eliminated.
-5. **Rate Limiting**: Implement strict rate limits on the `/submissions` endpoint to prevent OpenAI API abuse.
+1. **Spectator Mode**: Allow non-logged-in users to view rooms via a read-only WebSocket connection.
+2. **AI-Automated Scoring**: Use an LLM with a strict scoring rubric to remove host subjectivity from evaluation.
+3. **Enhanced UI Animations**: Add Framer Motion for smoother transitions when jobs complete or participants are eliminated.
+4. **Rate Limiting**: Implement strict rate limits on the `/jobs/{id}/retry` endpoint to prevent OpenAI API abuse.
+5. **Stuck Job Recovery**: Periodic sweep to reset jobs stuck in `running` state if the worker crashed mid-execution.
