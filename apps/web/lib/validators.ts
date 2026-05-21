@@ -16,6 +16,7 @@ export type RegisterFormData = z.infer<typeof registerSchema>;
 export const createRoomSchema = z.object({
   title: z.string().min(3, "Title must be at least 3 characters").max(100),
   challenge_prompt: z.string().min(10, "Challenge prompt must be at least 10 characters").max(500),
+  max_rounds: z.coerce.number().int().min(1, "Must have at least 1 round").max(10, "Max 10 rounds").default(3),
 });
 export type CreateRoomFormData = z.infer<typeof createRoomSchema>;
 

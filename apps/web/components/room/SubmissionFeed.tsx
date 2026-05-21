@@ -16,7 +16,6 @@ export function SubmissionFeed({
     return (
       <div className="flex flex-col items-center justify-center py-12 text-zinc-500 border border-dashed border-zinc-800 rounded-xl bg-zinc-900/30">
         <p>No submissions yet for this round.</p>
-        <p className="text-sm mt-1">Be the first to submit!</p>
       </div>
     );
   }

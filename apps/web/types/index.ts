@@ -12,6 +12,7 @@ export interface Room {
   challenge_prompt: string;
   host_id: string;
   status: "waiting" | "active" | "completed";
+  max_rounds: number;
   created_at: string;
 }
 
@@ -80,11 +81,13 @@ export type WSEvent =
   | { event: "round:started"; data: { round_id: string; round_number: number } }
   | { event: "round:ended"; data: { round_id: string } }
   | { event: "participant:joined"; data: Participant }
+  | { event: "participant:left"; data: { participant_id: string } }
   | { event: "participant:eliminated"; data: { participant_id: string } }
-  | { event: "submission:created"; data: { submission_id: string; participant_id: string } }
+  | { event: "submission:created"; data: { submission_id: string; participant_id: string; prompt: string } }
   | { event: "job:queued"; data: { job_id: string; submission_id: string } }
   | { event: "job:running"; data: { job_id: string } }
   | { event: "job:completed"; data: { job_id: string; submission_id: string; output: string } }
   | { event: "job:failed"; data: { job_id: string; error_message: string } }
   | { event: "job:timed_out"; data: { job_id: string } }
-  | { event: "score:submitted"; data: { participant_id: string; points: number; is_eliminated: boolean } };
+  | { event: "score:submitted"; data: { participant_id: string; points: number; is_eliminated: boolean } }
+  | { event: "room:completed"; data: { room_id: string } };

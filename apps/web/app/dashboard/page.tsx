@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useForm } from "react-hook-form";
+import { useForm, Resolver } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Loader2, Plus, LogIn, LogOut } from "lucide-react";
 import { toast } from "sonner";
@@ -36,8 +36,8 @@ export default function DashboardPage() {
   }, [user]);
 
   const createForm = useForm<CreateRoomFormData>({
-    resolver: zodResolver(createRoomSchema),
-    defaultValues: { title: "", challenge_prompt: "" },
+    resolver: zodResolver(createRoomSchema) as Resolver<CreateRoomFormData>,
+    defaultValues: { title: "", challenge_prompt: "", max_rounds: 3 },
   });
 
   const joinForm = useForm<JoinRoomFormData>({
@@ -146,6 +146,26 @@ export default function DashboardPage() {
                             placeholder="Write a 3-line haiku about a rogue AI..." 
                             className="bg-zinc-950 border-zinc-800"
                             {...field} 
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={createForm.control}
+                    name="max_rounds"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Number of Rounds</FormLabel>
+                        <FormControl>
+                          <Input 
+                            type="number"
+                            min={1}
+                            max={10}
+                            step={1}
+                            className="bg-zinc-950 border-zinc-800 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                            {...field}
                           />
                         </FormControl>
                         <FormMessage />

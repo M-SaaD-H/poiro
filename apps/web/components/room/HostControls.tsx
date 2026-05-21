@@ -9,11 +9,13 @@ import type { Round } from "@/types";
 export function HostControls({ 
   roomId, 
   roomStatus,
-  activeRound 
+  activeRound,
+  participantCount,
 }: { 
   roomId: string, 
   roomStatus: string,
-  activeRound: Round | null 
+  activeRound: Round | null,
+  participantCount: number,
 }) {
   const [isStarting, setIsStarting] = useState(false);
   const [isEnding, setIsEnding] = useState(false);
@@ -46,17 +48,23 @@ export function HostControls({
   const isRoomActive = roomStatus === "active";
   const hasActiveRound = activeRound?.status === "active";
   const hasScoringRound = activeRound?.status === "scoring";
+  const hasEnoughParticipants = participantCount >= 2;
 
   return (
     <Card className="bg-zinc-900 border-indigo-500/30 ring-1 ring-indigo-500/20 shadow-lg shadow-indigo-900/10">
       <CardContent className="p-4 flex items-center justify-between">
-        <div className="text-zinc-300 font-medium">
-          Host Controls
+        <div className="space-y-0.5">
+          <div className="text-zinc-300 font-medium">Host Controls</div>
+          {!hasEnoughParticipants && !hasActiveRound && !hasScoringRound && (
+            <p className="text-xs text-zinc-500">
+              Waiting for participants ({participantCount}/2 minimum)
+            </p>
+          )}
         </div>
         <div className="flex gap-3">
           <Button 
             onClick={handleStartRound}
-            disabled={!isRoomActive || hasActiveRound || hasScoringRound || isStarting}
+            disabled={!isRoomActive || !hasEnoughParticipants || hasActiveRound || hasScoringRound || isStarting}
             className="bg-indigo-600 hover:bg-indigo-700 text-white"
           >
             {isStarting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Play className="w-4 h-4 mr-2" />}

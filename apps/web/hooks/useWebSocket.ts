@@ -4,7 +4,6 @@ import { WSEvent } from "@/types";
 
 export function useWebSocket(roomId: string | undefined) {
   const wsRef = useRef<WebSocket | null>(null);
-  const { applyEvent, setConnected } = useRoomStore();
 
   useEffect(() => {
     if (!roomId) return;
@@ -18,14 +17,14 @@ export function useWebSocket(roomId: string | undefined) {
 
     ws.onopen = () => {
       console.log(`WebSocket connected to room ${roomId}`);
-      setConnected(true);
+      useRoomStore.getState().setConnected(true);
     };
 
     ws.onmessage = (event) => {
       try {
         const parsed = JSON.parse(event.data) as WSEvent;
         console.log("WS Received:", parsed);
-        applyEvent(parsed);
+        useRoomStore.getState().applyEvent(parsed);
       } catch (err) {
         console.error("Failed to parse WS message", err);
       }
@@ -33,7 +32,7 @@ export function useWebSocket(roomId: string | undefined) {
 
     ws.onclose = (event) => {
       console.log(`WebSocket disconnected: ${event.code} ${event.reason}`);
-      setConnected(false);
+      useRoomStore.getState().setConnected(false);
     };
 
     ws.onerror = (error) => {
@@ -45,7 +44,7 @@ export function useWebSocket(roomId: string | undefined) {
         ws.close();
       }
     };
-  }, [roomId, applyEvent, setConnected]);
+  }, [roomId]);
 
   return wsRef.current;
 }
