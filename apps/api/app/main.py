@@ -7,11 +7,13 @@ from contextlib import asynccontextmanager
 from collections.abc import AsyncGenerator
 
 import arq
+from arq import Worker
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.database import engine, get_supabase
+from app.jobs.worker import WorkerSettings
 
 logger = logging.getLogger(__name__)
 
@@ -50,20 +52,37 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # and realtime worker broadcasts degrade gracefully until Redis recovers.
     app.state.redis = None
     pubsub_task = None
+    worker_task = None
     try:
         redis_settings = arq.connections.RedisSettings.from_dsn(settings.redis_url)
         app.state.redis = await arq.create_pool(redis_settings)
         logger.info("ARQ Redis pool initialised.")
 
         # Background Pub/Sub listener — receives events published by the ARQ
-        # worker (separate process) and fans them out to in-process WebSocket
-        # connections.
+        # worker and fans them out to in-process WebSocket connections.
         from app.ws.pubsub import pubsub_listener
         pubsub_task = asyncio.create_task(
             pubsub_listener(settings.redis_url),
             name="pubsub_listener",
         )
         logger.info("Pub/Sub listener task started.")
+
+        # Embedded ARQ worker — runs job processing in-process so a separate
+        # background worker service is not required (single Render web service).
+        from app.jobs.tasks import run_generation_job
+        embedded_worker = Worker(
+            functions=[run_generation_job],
+            redis_settings=redis_settings,
+            max_jobs=WorkerSettings.max_jobs,
+            job_timeout=WorkerSettings.job_timeout,
+            keep_result=WorkerSettings.keep_result,
+            queue_name=WorkerSettings.queue_name,
+        )
+        worker_task = asyncio.create_task(
+            embedded_worker.async_run(),
+            name="arq_worker",
+        )
+        logger.info("Embedded ARQ worker task started.")
     except Exception as exc:
         logger.warning(
             "Redis unavailable at startup (%s). Job queueing and realtime worker "
@@ -72,16 +91,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             exc,
         )
 
+
     yield
 
     # ── Shutdown ──────────────────────────────────────────────────────────────
-    if pubsub_task is not None:
-        pubsub_task.cancel()
-        try:
-            await pubsub_task
-        except asyncio.CancelledError:
-            pass
-        logger.info("Pub/Sub listener stopped.")
+    for task, name in [(pubsub_task, "Pub/Sub listener"), (worker_task, "ARQ worker")]:
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            logger.info("%s stopped.", name)
 
     if app.state.redis is not None:
         await app.state.redis.aclose()
