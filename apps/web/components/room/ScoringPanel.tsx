@@ -7,14 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
-import { CheckCircle2, Trophy, Loader2, Play, Flag, Crown, Medal } from "lucide-react";
-
-interface LeaderboardEntry {
-  participant_id: string;
-  display_name: string;
-  total_points: number;
-  is_eliminated: boolean;
-}
+import { CheckCircle2, Trophy, Loader2, Play, Flag } from "lucide-react";
 
 export function ScoringPanel({
   activeRound,
@@ -32,7 +25,6 @@ export function ScoringPanel({
   const [submittingIds, setSubmittingIds] = useState<Set<string>>(new Set());
   const [isStartingNext, setIsStartingNext] = useState(false);
   const [isEndingBattle, setIsEndingBattle] = useState(false);
-  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[] | null>(null);
 
   // Local state for the forms
   const [points, setPoints] = useState<Record<string, string>>({});
@@ -96,11 +88,9 @@ export function ScoringPanel({
   async function handleEndBattle() {
     setIsEndingBattle(true);
     try {
-      // Fetch leaderboard first, then complete the room
-      const { data } = await api.get(`/rooms/${room.id}/leaderboard`);
-      setLeaderboard(data);
       await api.post(`/rooms/${room.id}/complete`);
-      toast.success("Battle ended! Check the leaderboard.");
+      // room:completed WS event will fire and page.tsx's useEffect
+      // redirects everyone (host + all participants) to /dashboard
     } catch (error: any) {
       toast.error(error.response?.data?.detail || "Failed to end battle");
       setIsEndingBattle(false);
@@ -122,52 +112,6 @@ export function ScoringPanel({
   const isLastRound = activeRound.round_number >= room.max_rounds;
 
   if (loadingScores) return <div className="text-zinc-500 py-4">Loading scores...</div>;
-
-  // Leaderboard overlay shown after End Battle
-  if (leaderboard) {
-    return (
-      <Card className="bg-zinc-900 border-yellow-500/30 ring-1 ring-yellow-500/20">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-yellow-400">
-            <Crown className="w-5 h-5" /> Final Leaderboard
-          </CardTitle>
-          <CardDescription className="text-zinc-400">
-            Battle complete after {room.max_rounds} round{room.max_rounds !== 1 ? "s" : ""}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {leaderboard.map((entry, idx) => (
-            <div
-              key={entry.participant_id}
-              className={`flex items-center justify-between p-3 rounded-lg border ${
-                idx === 0
-                  ? "bg-yellow-950/40 border-yellow-700/50"
-                  : "bg-zinc-950 border-zinc-800"
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <span className="text-lg font-bold text-zinc-400 w-6 text-center">
-                  {idx === 0 ? <Crown className="w-5 h-5 text-yellow-400" /> : idx === 1 ? <Medal className="w-5 h-5 text-zinc-300" /> : idx === 2 ? <Medal className="w-5 h-5 text-amber-600" /> : `#${idx + 1}`}
-                </span>
-                <span className={`font-medium ${entry.is_eliminated ? "text-zinc-500 line-through" : "text-zinc-100"}`}>
-                  {entry.display_name}
-                </span>
-                {entry.is_eliminated && (
-                  <span className="text-xs text-red-400 bg-red-950/40 px-2 py-0.5 rounded-full border border-red-900/50">
-                    Eliminated
-                  </span>
-                )}
-              </div>
-              <span className="text-lg font-bold text-yellow-400">{entry.total_points} pts</span>
-            </div>
-          ))}
-          {leaderboard.length === 0 && (
-            <p className="text-zinc-500 text-sm italic">No scores recorded.</p>
-          )}
-        </CardContent>
-      </Card>
-    );
-  }
 
   return (
     <Card className="bg-zinc-900 border-yellow-500/30 ring-1 ring-yellow-500/20">

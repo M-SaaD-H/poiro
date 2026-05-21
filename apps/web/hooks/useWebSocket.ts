@@ -75,6 +75,13 @@ export function useWebSocket(roomId: string | undefined) {
           return;
         }
 
+        // Room completed — page is redirecting, no point reconnecting
+        const currentRoom = useRoomStore.getState().room;
+        if (currentRoom?.status === "completed") {
+          console.log("[WS] Room completed — stopping reconnect loop.");
+          return;
+        }
+
         const delay = getBackoffDelay();
         console.log(`[WS] Reconnecting in ${delay}ms (attempt ${reconnectAttemptRef.current})`);
         reconnectTimerRef.current = setTimeout(() => {

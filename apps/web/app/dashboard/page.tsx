@@ -37,7 +37,7 @@ export default function DashboardPage() {
 
   const createForm = useForm<CreateRoomFormData>({
     resolver: zodResolver(createRoomSchema) as Resolver<CreateRoomFormData>,
-    defaultValues: { title: "", challenge_prompt: "", max_rounds: 3 },
+    defaultValues: { title: "", challenge_prompt: "" },
   });
 
   const joinForm = useForm<JoinRoomFormData>({
@@ -161,6 +161,7 @@ export default function DashboardPage() {
                         <FormControl>
                           <Input 
                             type="number"
+                            placeholder="3"
                             min={1}
                             max={10}
                             step={1}
