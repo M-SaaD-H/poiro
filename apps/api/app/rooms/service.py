@@ -56,6 +56,7 @@ async def create_room(
         challenge_prompt=body.challenge_prompt,
         host_id=host_id,
         status=RoomStatus.waiting,
+        max_rounds=body.max_rounds,
     )
     session.add(room)
     await session.flush()
