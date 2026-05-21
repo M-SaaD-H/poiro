@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { RoomSnapshot, WSEvent, Room, Participant, Round, Submission, GenerationJob } from "@/types";
+import { RoomSnapshot, WSEvent, Room, Participant, Round, Submission, GenerationJob, Score } from "@/types";
 
 interface RoomState {
   room: Room | null;
@@ -7,6 +7,7 @@ interface RoomState {
   participants: Participant[];
   submissions: Submission[];
   jobs: Record<string, GenerationJob>;
+  scores: Score[];
   connected: boolean;
 
   setRoomState: (snapshot: RoomSnapshot) => void;
@@ -21,6 +22,7 @@ export const useRoomStore = create<RoomState>((set) => ({
   participants: [],
   submissions: [],
   jobs: {},
+  scores: [],
   connected: false,
 
   setConnected: (connected) => set({ connected }),
@@ -37,6 +39,7 @@ export const useRoomStore = create<RoomState>((set) => ({
       participants: snapshot.participants,
       submissions: snapshot.submissions,
       jobs: jobsRecord,
+      scores: [],
     });
   },
 
@@ -53,6 +56,7 @@ export const useRoomStore = create<RoomState>((set) => ({
           participants: event.data.participants,
           submissions: event.data.submissions,
           jobs: jobsRecord,
+          scores: [],
         };
       }
 
@@ -67,7 +71,8 @@ export const useRoomStore = create<RoomState>((set) => ({
           ended_at: null,
           created_at: new Date().toISOString(),
         };
-        return { activeRound: newRound, submissions: [], jobs: {} };
+        // Clear per-round data when a new round starts
+        return { activeRound: newRound, submissions: [], jobs: {}, scores: [] };
       }
 
       case "round:ended": {
@@ -77,9 +82,12 @@ export const useRoomStore = create<RoomState>((set) => ({
       }
 
       case "participant:joined": {
+        // Destructure room_status (sent by backend) out before storing the participant
+        const { room_status, ...participant } = event.data;
+        const newStatus = room_status ?? state.room?.status;
         return {
-          participants: [...state.participants, event.data],
-          room: state.room ? { ...state.room, status: "active" } : state.room,
+          participants: [...state.participants, participant],
+          room: state.room ? { ...state.room, status: newStatus ?? state.room.status } : state.room,
         };
       }
 
@@ -130,26 +138,22 @@ export const useRoomStore = create<RoomState>((set) => ({
       case "job:running": {
         const existing = state.jobs[event.data.job_id];
         if (!existing) return state;
-        const updatedJob: GenerationJob = {
-          ...existing,
-          status: "running",
-          started_at: new Date().toISOString(),
-        };
         return {
-          jobs: { ...state.jobs, [event.data.job_id]: updatedJob }
+          jobs: {
+            ...state.jobs,
+            [event.data.job_id]: { ...existing, status: "running", started_at: new Date().toISOString() },
+          }
         };
       }
 
       case "job:completed": {
         const existing = state.jobs[event.data.job_id];
         if (!existing) return state;
-        const updatedJob: GenerationJob = {
-          ...existing,
-          status: "completed",
-          completed_at: new Date().toISOString(),
-        };
         return {
-          jobs: { ...state.jobs, [event.data.job_id]: updatedJob },
+          jobs: {
+            ...state.jobs,
+            [event.data.job_id]: { ...existing, status: "completed", completed_at: new Date().toISOString() },
+          },
           submissions: state.submissions.map(sub =>
             sub.id === event.data.submission_id ? { ...sub, generated_output: event.data.output } : sub
           )
@@ -159,39 +163,52 @@ export const useRoomStore = create<RoomState>((set) => ({
       case "job:failed": {
         const existing = state.jobs[event.data.job_id];
         if (!existing) return state;
-        const updatedJob: GenerationJob = {
-          ...existing,
-          status: "failed",
-          error_message: event.data.error_message,
-          completed_at: new Date().toISOString(),
-        };
         return {
-          jobs: { ...state.jobs, [event.data.job_id]: updatedJob }
+          jobs: {
+            ...state.jobs,
+            [event.data.job_id]: {
+              ...existing,
+              status: "failed",
+              error_message: event.data.error_message,
+              completed_at: new Date().toISOString(),
+            },
+          }
         };
       }
 
       case "job:timed_out": {
         const existing = state.jobs[event.data.job_id];
         if (!existing) return state;
-        const updatedJob: GenerationJob = {
-          ...existing,
-          status: "timed_out",
-          completed_at: new Date().toISOString(),
-        };
         return {
-          jobs: { ...state.jobs, [event.data.job_id]: updatedJob }
+          jobs: {
+            ...state.jobs,
+            [event.data.job_id]: { ...existing, status: "timed_out", completed_at: new Date().toISOString() },
+          }
         };
       }
 
       case "score:submitted": {
-        if (event.data.is_eliminated) {
-          return {
-            participants: state.participants.map(p =>
-              p.id === event.data.participant_id ? { ...p, is_eliminated: true } : p
-            )
-          };
-        }
-        return state;
+        const { participant_id, points, is_eliminated } = event.data;
+
+        // Accumulate score in the scores slice
+        const newScore: Score = {
+          id: `${participant_id}-${Date.now()}`, // client-side ephemeral id
+          round_id: state.activeRound?.id ?? "",
+          participant_id,
+          submission_id: "",
+          points,
+          is_eliminated,
+          scored_by: "",
+          scored_at: new Date().toISOString(),
+        };
+
+        return {
+          scores: [...state.scores, newScore],
+          // Mark participant as eliminated if the flag is set
+          participants: state.participants.map(p =>
+            p.id === participant_id && is_eliminated ? { ...p, is_eliminated: true } : p
+          ),
+        };
       }
 
       case "room:completed": {
@@ -210,6 +227,7 @@ export const useRoomStore = create<RoomState>((set) => ({
     participants: [],
     submissions: [],
     jobs: {},
+    scores: [],
     connected: false,
   })
 }));

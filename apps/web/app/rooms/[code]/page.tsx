@@ -254,17 +254,19 @@ export default function BattleRoomPage() {
             {/* Participant Only: Waiting state when round is not active */}
             {!isHost && !isEliminated && !isRoundActive && (
               <div className="p-6 bg-zinc-900/50 border border-zinc-800 rounded-xl text-center text-zinc-400">
-                Waiting for the host to start the {activeRound ? 'next ' : ''}round...
+                {isScoringPhase
+                  ? "Waiting for the host to finish scoring…"
+                  : `Waiting for the host to start the ${activeRound ? "next " : ""}round…`}
               </div>
             )}
 
-            {/* Submission Feed — visible to host only */}
-            {isHost && (isRoundActive || isScoringPhase || submissions.length > 0) && (
-              <SubmissionFeed 
-                submissions={submissions} 
-                jobs={jobs} 
-                participants={participants} 
-                currentUserId={user?.id || ""} 
+            {/* Submission Feed — visible to all users once there are submissions */}
+            {(isRoundActive || isScoringPhase || submissions.length > 0) && (
+              <SubmissionFeed
+                submissions={submissions}
+                jobs={jobs}
+                participants={participants}
+                currentUserId={user?.id || ""}
               />
             )}
           </div>

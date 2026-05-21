@@ -80,7 +80,7 @@ export type WSEvent =
   | { event: "room:state"; data: RoomSnapshot }
   | { event: "round:started"; data: { round_id: string; round_number: number } }
   | { event: "round:ended"; data: { round_id: string } }
-  | { event: "participant:joined"; data: Participant }
+  | { event: "participant:joined"; data: Participant & { room_status?: Room["status"] } }
   | { event: "participant:left"; data: { participant_id: string } }
   | { event: "participant:eliminated"; data: { participant_id: string } }
   | { event: "submission:created"; data: { submission_id: string; participant_id: string; prompt: string } }
