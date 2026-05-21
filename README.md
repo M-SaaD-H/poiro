@@ -7,167 +7,211 @@ Poiro is a real-time, minimal multiplayer web platform where a host runs creativ
 ### Prerequisites
 - [Node.js](https://nodejs.org/) (≥ 20) and [Bun](https://bun.sh/)
 - [Python](https://www.python.org/) (≥ 3.11)
-- [Redis](https://redis.io/) (Running locally or via Docker)
-- PostgreSQL (or Supabase local instance)
+- [Redis](https://redis.io/) (running locally or via Docker)
+- A [Supabase](https://supabase.com) project (free tier)
 
 ### Installation
 
-1. **Clone & Install Dependencies**
+1. **Clone & install dependencies**
    ```bash
    git clone <repo-url>
    cd poiro
    bun install
    ```
 
-2. **Environment Variables**
+2. **Environment variables**
    ```bash
    cp .env.example .env
    cp apps/api/.env.example apps/api/.env
    cp apps/web/.env.local.example apps/web/.env.local
    ```
-   *Edit `.env` files to match your local database and Redis setup.*
+   Edit each file to match your Supabase project and local Redis setup.
 
-3. **Backend Setup (FastAPI)**
+3. **Backend Python environment**
    ```bash
    cd apps/api
    python -m venv .venv
    source .venv/bin/activate
    pip install -r requirements.txt
-   alembic upgrade head
    ```
 
-4. **Start the Services**
-   Open three terminal tabs:
-   - **FastAPI API Server**: `cd apps/api && uvicorn app.main:app --reload --port 8000`
-   - **ARQ Worker (Redis job queue)**: `cd apps/api && arq app.jobs.worker.WorkerSettings`
-   - **Next.js Frontend**: `cd apps/web && bun run dev`
+4. **Database setup** — run `supabase/setup.sql` in your Supabase SQL Editor (see §3).
 
-Visit `http://localhost:3000` to start playing.
+5. **Start everything**
+   ```bash
+   # From the repo root — Turborepo starts API + Next.js together
+   bun run dev
+   ```
+   > The ARQ job worker runs **embedded inside the FastAPI process** — no separate terminal needed.
+
+Visit `http://localhost:3000`.
 
 ---
 
 ## 2. Architecture Overview
 
-Poiro uses a robust decoupled architecture:
-- **Frontend**: Next.js 14 App Router, Zustand for state, TanStack Query for REST data, and native WebSockets.
-- **Backend**: FastAPI with async SQLAlchemy, communicating with a PostgreSQL database.
-- **Job Queue**: ARQ (Redis) handles long-running AI generation jobs asynchronously to prevent blocking the API.
-- **Realtime**: FastAPI WebSockets broadcast state changes to clients in real-time.
-
 ```text
-[ Next.js Client ] <--(REST & WS)--> [ FastAPI Server ] <--(SQL)--> [ PostgreSQL ]
+[ Next.js Client ] <--(REST & WS)--> [ FastAPI Server ] <--(SQL)--> [ Supabase Postgres ]
                                            |
                                       (Enqueue)
                                            |
                                            v
-[ AI Providers ] <--(Async API)-->   [ ARQ Worker ] <--(Redis)--> [ Redis DB ]
+[ AI Provider (OpenAI) ] <----------  [ ARQ Worker ]  <--(Redis)--> [ Redis / Upstash ]
 ```
+
+- **Frontend**: Next.js 14 App Router · Zustand · TanStack Query · native WebSockets
+- **Backend**: FastAPI · async SQLAlchemy · Pydantic v2
+- **Auth**: Supabase Auth (JWT, ES256 — no custom secret)
+- **Job Queue**: ARQ (Redis) — async AI generation, non-blocking
+- **Realtime**: FastAPI WebSocket + Redis Pub/Sub backplane
 
 ---
 
-## 3. Database Schema
+## 3. Database Setup (Supabase SQL Editor)
 
-- **Users**: `id`, `email`, `hashed_password`, `display_name`
-- **Rooms**: `id`, `code`, `title`, `challenge_prompt`, `host_id`, `status`
-- **Participants**: `id`, `room_id`, `user_id`, `is_eliminated`, `joined_at`
-- **Rounds**: `id`, `room_id`, `round_number`, `status`
-- **Submissions**: `id`, `round_id`, `participant_id`, `prompt`, `generated_output`
-- **GenerationJobs**: `id`, `submission_id`, `status`, `error_message`, `enqueued_at`, `completed_at`
-- **Scores**: `id`, `round_id`, `participant_id`, `submission_id`, `points`, `is_eliminated`, `scored_by`
+Run **`supabase/setup.sql`** in **Supabase Dashboard → SQL Editor → New Query**.
+
+The script is **idempotent** — safe to run on a fresh or existing project. It:
+1. Creates Postgres enums (`roomstatus`, `roundstatus`, `jobstatus`)
+2. Creates all tables (`users`, `rooms`, `participants`, `rounds`, `submissions`, `generation_jobs`, `scores`)
+3. Applies the `max_rounds` column patch (safe even if the column already exists)
+4. Seeds 4 test user profiles (see §11 — you must create auth accounts first)
+
+### Schema summary
+
+| Table | Key columns |
+|---|---|
+| `users` | `id` (= auth.users.id), `email`, `display_name` |
+| `rooms` | `id`, `code`, `title`, `challenge_prompt`, `host_id`, `status`, `max_rounds` |
+| `participants` | `id`, `room_id`, `user_id`, `is_eliminated` |
+| `rounds` | `id`, `room_id`, `round_number`, `status` |
+| `submissions` | `id`, `round_id`, `participant_id`, `prompt`, `generated_output` |
+| `generation_jobs` | `id`, `submission_id`, `status`, `retry_count` |
+| `scores` | `id`, `round_id`, `participant_id`, `points`, `is_eliminated`, `scored_by` |
 
 ---
 
 ## 4. Realtime Event Model
 
-All WebSocket events follow the `{ "event": "<name>", "data": { ... } }` structure.
+All WebSocket events follow `{ "event": "<name>", "data": { ... } }`.
 
 | Event | Direction | Purpose |
 |---|---|---|
-| `room:state` | Server → Client | Full state hydration upon initial connection. |
-| `round:started` | Server → Room | Notifies participants a new round has begun. |
-| `round:ended` | Server → Room | Notifies participants the round is over; moves to scoring. |
-| `participant:joined`| Server → Room | Real-time participant roster updates. |
-| `participant:eliminated`| Server → Room| Marks a participant as eliminated across all clients. |
-| `submission:created`| Server → Room | Signals a user has locked in their prompt. |
-| `job:queued` | Server → Room | AI generation job entered Redis queue. |
-| `job:running` | Server → Room | Worker started generating AI response. |
-| `job:completed` | Server → Room | Worker finished; delivers final output. |
-| `job:failed` / `timed_out`| Server → Room | Generation failed; allows UI to show retry button. |
-| `score:submitted` | Server → Room | Host has scored a participant's submission. |
+| `room:state` | Server → Client | Full state hydration on connect / reconnect |
+| `round:started` | Server → Room | New round began |
+| `round:ended` | Server → Room | Round over; enters scoring phase |
+| `participant:joined` | Server → Room | Roster update |
+| `participant:eliminated` | Server → Room | Participant marked eliminated |
+| `submission:created` | Server → Room | Prompt locked in |
+| `job:queued` | Server → Room | AI job enqueued |
+| `job:running` | Server → Room | Worker started |
+| `job:completed` | Server → Room | AI output ready |
+| `job:failed` / `job:timed_out` | Server → Room | Generation failed |
+| `score:submitted` | Server → Room | Host scored a submission |
+| `room:completed` | Server → Room | Battle ended. `early: true` → force-close (redirect all); `early: false` → all rounds done (show leaderboard) |
 
 ---
 
 ## 5. Generation Job Lifecycle
 
-Generation tasks are handled by a finite state machine managed by ARQ:
-
 ```text
 [ Submission Created ]
           |
           v
-      (QUEUED) ---------> (TIMED_OUT) --+
-          |                             |
-          v                             v
-      (RUNNING) --------> (FAILED) <----+
-          |                 |
-          v                 v
-     (COMPLETED)         [ Retry ]
+      (QUEUED) --------->  (TIMED_OUT) --+
+          |                              |
+          v                              v
+      (RUNNING) --------> (FAILED) <-----+
+          |                  |
+          v                  v
+     (COMPLETED)          [ Retry ]
 ```
 
 ---
 
-## 6. Battle Mechanism
+## 6. Battle Flow
 
-**Current Implementation**: Host-assigned points with an elimination flag.
-- After a round ends, the host reviews all generated outputs.
-- The host awards points (0-100) per participant and can optionally eliminate them.
-- Eliminated participants can observe but cannot submit in future rounds.
-
-**Weaknesses**: 
-- Highly subjective; reliant entirely on host judgment.
-- Susceptible to host bias or favoritism.
-- Does not scale well for large rooms (host bottleneck).
-
-**Production Improvements**:
-- **Peer Voting**: Participants rank each other's outputs anonymously.
-- **AI-Automated Scoring**: Use an LLM with a strict rubric to score outputs objectively based on the original challenge context.
-- **Weighted Crowd Score**: Combine host score, peer votes, and AI evaluation.
+1. Host creates a room with a challenge prompt and number of rounds
+2. Participants join via the 6-character room code
+3. Host clicks **Start Round** → participants submit prompts → AI generates outputs
+4. All participants submit → round ends automatically
+5. Host scores each submission (0–100 pts, optional elimination)
+6. Repeat for each round
+7. After the final round, host clicks **End Battle** → leaderboard shown to all
+8. Host can also click **Close Battle** (top-right) at any time to force-close early → participants redirected to dashboard
 
 ---
 
 ## 7. Persistence
 
-**Persisted (Database)**:
-- Users, Rooms, Rounds, Participants, Submissions, Scores, Job histories.
-- JWT tokens are strictly validated against user records.
+**Persisted (Supabase Postgres)**:  
+Users, Rooms, Rounds, Participants, Submissions, Scores, Generation job history.
 
-**Ephemeral (Memory/Redis)**:
-- WebSocket connection registry (FastAPI memory).
-- Active job queue (Redis).
-- Client-side live state (Zustand store). If a client refreshes, Zustand is rehydrated via a single REST snapshot call (`/api/rooms/{id}/state`).
+**Ephemeral (memory / Redis)**:  
+- WebSocket connection registry (in-process)
+- Active job queue (Redis)
+- Client Zustand store — rehydrated from `GET /api/rooms/{code}/state` on reconnect
 
 ---
 
 ## 8. Failure Handling
 
-- **Job Failures**: If the AI provider fails or times out (30s limit), the job transitions to `failed` or `timed_out`. The frontend displays a "Retry" button allowing the participant to re-enqueue the job.
-- **WS Disconnects**: If the WebSocket drops, the `useWebSocket` hook automatically reconnects with exponential backoff (500ms → 30s cap). On reconnect the server re-sends `room:state`, fully re-hydrating the client without a page reload.
-- **Invalid Prompts**: Validated deeply by Zod on the frontend, and Pydantic on the backend.
+| Failure | Behaviour |
+|---|---|
+| AI generation timeout (30 s) | Job → `timed_out`; frontend shows Retry button |
+| AI provider error | Job → `failed`; same retry path |
+| WebSocket disconnect | `useWebSocket` reconnects with exponential backoff (500 ms → 30 s cap); server resends `room:state` |
+| Redis unavailable at startup | API starts in degraded mode — REST endpoints work, realtime and jobs disabled |
+| Invalid prompt | Rejected by Zod (frontend) and Pydantic (backend) before hitting the DB |
 
 ---
 
 ## 9. Known Limitations
 
-- **Scalability of WebSockets**: The current `ConnectionManager` is in-memory. For multi-pod horizontal scaling, the Redis Pub/Sub backplane (`ws/pubsub.py`) introduced here is a prerequisite step.
-- **Supabase Auth (JWT)**: Authentication is handled by Supabase Auth. The API verifies JWTs by fetching the project's JWKS endpoint (`/auth/v1/.well-known/jwks.json`), validating the asymmetric signature (ES256/RS256) and `role: authenticated` claim. No custom JWT secret is used.
-- **Single Active Round**: The system assumes strict linear progression. You cannot run multiple rounds concurrently in the same room.
+- **In-memory WS registry**: horizontal scaling requires migrating to a fully Redis-backed session store (the Pub/Sub backplane is already in place as a foundation)
+- **Host-only scoring**: subjective; a future AI-rubric or peer-vote system would remove the bottleneck
+- **Single active round per room**: no concurrent round support
+- **Stuck job recovery**: jobs stuck in `running` if a worker crashes mid-task require a periodic sweep cronjob
 
 ---
 
 ## 10. What I'd Improve With More Time
 
-1. **Spectator Mode**: Allow non-logged-in users to view rooms via a read-only WebSocket connection.
-2. **AI-Automated Scoring**: Use an LLM with a strict scoring rubric to remove host subjectivity from evaluation.
-3. **Enhanced UI Animations**: Add Framer Motion for smoother transitions when jobs complete or participants are eliminated.
-4. **Rate Limiting**: Implement strict rate limits on the `/jobs/{id}/retry` endpoint to prevent OpenAI API abuse.
-5. **Stuck Job Recovery**: Periodic sweep to reset jobs stuck in `running` state if the worker crashed mid-execution.
+1. **Spectator mode** — read-only WebSocket for non-participants
+2. **AI-automated scoring** — LLM rubric removes host subjectivity
+3. **Framer Motion animations** — smoother transitions on job completion / elimination
+4. **Rate limiting** — strict limits on `/jobs/{id}/retry` to prevent API abuse
+5. **Stuck job sweep** — background task to reset orphaned `running` jobs
+
+---
+
+## 11. Test Accounts
+
+Use these to review the full game flow without registering.
+
+| Role | Email | Password |
+|---|---|---|
+| 🎮 Host | `host@example.com` | `Poiro@host1` |
+| 👤 Participant 1 | `alice@example.com` | `Poiro@alice1` |
+| 👤 Participant 2 | `bob@example.com` | `Poiro@bob1` |
+| 👤 Participant 3 | `carol@example.com` | `Poiro@carol1` |
+
+**Suggested review flow:**
+1. Log in as **Host** → Create a room (2 rounds, any challenge prompt)
+2. Open 3 browser tabs → log in as **Alice**, **Bob**, **Carol** → join the room using the code
+3. Host clicks **Start Round** → each participant submits a prompt → watch AI generation live
+4. Host scores each submission → repeat for round 2
+5. After round 2 is scored, host clicks **End Battle** → final leaderboard appears for all users
+6. *(Optional)* To test force-close: host clicks **Close Battle** (top-right) mid-round → participants see "Battle Ended" popup and are redirected to dashboard
+
+---
+
+## 12. Deployment (Free Tier)
+
+| Component | Provider | Notes |
+|---|---|---|
+| Next.js frontend | [Vercel](https://vercel.com) | Set root directory to `apps/web` |
+| FastAPI API + embedded worker | [Render](https://render.com) | One free web service |
+| Postgres + Auth | [Supabase](https://supabase.com) | Free tier |
+| Redis | [Upstash](https://upstash.com) | Free — 10K cmd/day; use `rediss://` URL |
+
