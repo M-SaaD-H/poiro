@@ -27,7 +27,7 @@ async def get_current_user_id(
     Raises HTTP 401 if the token is missing, malformed, or expired.
     """
     try:
-        return verify_supabase_token(credentials.credentials)
+        return await verify_supabase_token(credentials.credentials)
     except (JWTError, ValueError) as exc:
         logger.warning("Invalid Supabase JWT: %s", exc)
         raise HTTPException(

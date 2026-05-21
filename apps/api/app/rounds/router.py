@@ -24,10 +24,11 @@ async def end_round_endpoint(
     from app.ws.manager import connection_manager
 
     round_ = await end_round(round_id, current_user.id, session)
-    await session.commit()
+    # session.commit() owned by get_session
     await connection_manager.broadcast_to_room(
         str(round_.room_id),
         "round:ended",
         {"round_id": str(round_.id)},
     )
     return round_
+

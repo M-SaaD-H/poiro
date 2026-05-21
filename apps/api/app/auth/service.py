@@ -45,10 +45,11 @@ _JWKS_TTL_SECONDS: int = 600              # 10 minutes, matching Supabase edge c
 _EXPECTED_ROLE = "authenticated"
 
 
-def _fetch_jwks() -> dict[str, Any]:
-    """Fetch and cache the JWKS from the Supabase Auth server (synchronous).
+async def _fetch_jwks() -> dict[str, Any]:
+    """Fetch and cache the JWKS from the Supabase Auth server (async).
 
     Returns a mapping of kid → JWK dict for fast key lookup.
+    Uses httpx.AsyncClient to avoid blocking the asyncio event loop.
     """
     global _JWKS_CACHE, _JWKS_CACHED_AT
 
@@ -59,8 +60,9 @@ def _fetch_jwks() -> dict[str, Any]:
     url = settings.resolved_jwks_url
     logger.debug("Refreshing JWKS from %s", url)
     try:
-        response = httpx.get(url, timeout=5.0)
-        response.raise_for_status()
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(url)
+            response.raise_for_status()
     except httpx.HTTPError as exc:
         logger.error("Failed to fetch JWKS: %s", exc)
         # Return stale cache if available rather than crashing every request
@@ -76,7 +78,7 @@ def _fetch_jwks() -> dict[str, Any]:
     return _JWKS_CACHE
 
 
-def verify_supabase_token(token: str) -> uuid.UUID:
+async def verify_supabase_token(token: str) -> uuid.UUID:
     """Validate a Supabase-issued JWT and return the user's UUID.
 
     Verification flow:
@@ -99,12 +101,11 @@ def verify_supabase_token(token: str) -> uuid.UUID:
     kid = unverified_header.get("kid")
     alg = unverified_header.get("alg", "HS256")
 
-    # 2. Fetch JWKS (cached)
-    jwks = _fetch_jwks()
+    # 2. Fetch JWKS (cached, async)
+    jwks = await _fetch_jwks()
 
     if not jwks:
         # Project still uses legacy HS256 — no JWKS available
-        # This path is kept for backward-compat but Supabase strongly discourages it
         logger.warning(
             "No JWKS keys found — falling back to legacy JWT secret verification. "
             "Migrate to asymmetric signing keys in Supabase Dashboard → Settings → JWT."
@@ -120,7 +121,7 @@ def verify_supabase_token(token: str) -> uuid.UUID:
         logger.info("kid %r not in JWKS cache, invalidating and retrying", kid)
         global _JWKS_CACHED_AT
         _JWKS_CACHED_AT = 0.0
-        jwks = _fetch_jwks()
+        jwks = await _fetch_jwks()
 
     if kid not in jwks:
         raise JWTError(f"Unknown signing key id: {kid!r}")

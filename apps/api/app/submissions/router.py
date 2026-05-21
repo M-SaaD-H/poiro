@@ -3,7 +3,7 @@
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_user, get_current_user_id
@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
     status_code=status.HTTP_201_CREATED,
 )
 async def submit_prompt(
+    request: Request,
     round_id: uuid.UUID,
     body: CreateSubmissionRequest,
     current_user: User = Depends(get_current_user),
@@ -30,10 +31,8 @@ async def submit_prompt(
 ) -> SubmissionWithJobResponse:
     """Submit a creative prompt for the active round. Enqueues an AI generation job."""
     from app.ws.manager import connection_manager
-    import arq
 
     result = await create_submission(round_id, body.prompt, current_user.id, session)
-    await session.commit()
 
     # Broadcast submission created event
     round_ = await session.get(Round, round_id)
@@ -47,13 +46,11 @@ async def submit_prompt(
                 "prompt": result.submission.prompt,
             },
         )
-        # Enqueue ARQ job — wrapped so a missing Redis doesn't crash the request
-        from app.config import get_settings
-        settings = get_settings()
+        # Enqueue ARQ job via the shared app-level Redis pool.
+        # Wrapped so a transient Redis hiccup doesn't crash the request.
         try:
-            redis = await arq.create_pool(arq.connections.RedisSettings.from_dsn(settings.redis_url))
+            redis = request.app.state.redis
             await redis.enqueue_job("run_generation_job", str(result.job.id))
-            await redis.aclose()
             await connection_manager.broadcast_to_room(
                 str(round_.room_id),
                 "job:queued",
@@ -77,20 +74,40 @@ async def get_submission_endpoint(
 
 @router.post("/jobs/{job_id}/retry", response_model=GenerationJobResponse)
 async def retry_job_endpoint(
+    request: Request,
     job_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> GenerationJobResponse:
-    """Retry a failed or timed-out generation job."""
-    import arq
-    from app.config import get_settings
+    """Retry a failed or timed-out generation job.
+
+    Resets the job to `queued`, re-enqueues it in ARQ, and broadcasts
+    `job:queued` so all room clients immediately see the updated status.
+    """
+    from app.ws.manager import connection_manager
 
     job_response = await retry_job(job_id, current_user.id, session)
-    await session.commit()
 
-    settings = get_settings()
-    redis = await arq.create_pool(arq.connections.RedisSettings.from_dsn(settings.redis_url))
+    # Use app-level Redis pool — no per-request pool creation
+    redis = request.app.state.redis
     await redis.enqueue_job("run_generation_job", str(job_id))
-    await redis.aclose()
+
+    # Broadcast job:queued so all room clients immediately reflect the retry
+    from app.submissions.models import Submission
+    from sqlalchemy import select
+
+    submission = await session.scalar(
+        select(Submission).where(Submission.id == job_response.submission_id)
+    )
+    if submission is not None:
+        from app.rounds.models import Round
+        round_ = await session.get(Round, submission.round_id)
+        if round_ is not None:
+            await connection_manager.broadcast_to_room(
+                str(round_.room_id),
+                "job:queued",
+                {"job_id": str(job_id), "submission_id": str(submission.id)},
+            )
 
     return job_response
+

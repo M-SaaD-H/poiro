@@ -1,10 +1,12 @@
 """FastAPI application factory with lifespan management and CORS."""
 
+import asyncio
 import logging
 import logging.config
 from contextlib import asynccontextmanager
 from collections.abc import AsyncGenerator
 
+import arq
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -24,10 +26,15 @@ def _configure_logging(log_level: str) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Application lifespan: verify DB connectivity on startup, dispose engine on shutdown.
+    """Application lifespan: initialise shared resources on startup, clean up on shutdown.
+
+    Resources managed here:
+      - app.state.redis   — shared ARQ Redis pool; used by routers to enqueue jobs
+                            without creating a new connection per request.
+      - pubsub_task       — background coroutine that subscribes to Redis Pub/Sub and
+                            fans out worker-emitted events to live WebSocket connections.
 
     Schema management is handled by Supabase SQL migrations (supabase/migrations/).
-    We no longer call Base.metadata.create_all here.
     """
     settings = get_settings()
     _configure_logging(settings.log_level)
@@ -37,7 +44,33 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     get_supabase()
     logger.info("Supabase client initialised.")
 
+    # Shared ARQ Redis pool — routers read from app.state.redis instead of
+    # opening a new pool on every request.
+    redis_settings = arq.connections.RedisSettings.from_dsn(settings.redis_url)
+    app.state.redis = await arq.create_pool(redis_settings)
+    logger.info("ARQ Redis pool initialised.")
+
+    # Background Pub/Sub listener — receives events published by the ARQ worker
+    # (separate process) and fans them out to in-process WebSocket connections.
+    from app.ws.pubsub import pubsub_listener
+    pubsub_task = asyncio.create_task(
+        pubsub_listener(settings.redis_url),
+        name="pubsub_listener",
+    )
+    logger.info("Pub/Sub listener task started.")
+
     yield
+
+    # ── Shutdown ──────────────────────────────────────────────────────────────
+    pubsub_task.cancel()
+    try:
+        await pubsub_task
+    except asyncio.CancelledError:
+        pass
+    logger.info("Pub/Sub listener stopped.")
+
+    await app.state.redis.aclose()
+    logger.info("ARQ Redis pool closed.")
 
     await engine.dispose()
     logger.info("Database engine disposed. Shutdown complete.")

@@ -30,7 +30,7 @@ async def submit_score_endpoint(
     from app.rounds.models import Round
 
     score = await submit_score(round_id, body, current_user.id, session)
-    await session.commit()
+    # session.commit() owned by get_session
 
     round_ = await session.get(Round, round_id)
     if round_ is not None:

@@ -42,7 +42,7 @@ async def websocket_room(
         return
 
     try:
-        _user_id = verify_supabase_token(token)
+        _user_id = await verify_supabase_token(token)
     except (JWTError, ValueError) as exc:
         logger.warning("WS auth failed for room %s: %s", room_id, exc)
         await websocket.close(code=_CLOSE_CODE_POLICY_VIOLATION, reason="Invalid authentication token.")

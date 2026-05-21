@@ -44,13 +44,19 @@ async def join_room_endpoint(
 ) -> ParticipantResponse:
     """Join a room as a participant using its join code."""
     participant = await join_room(code, current_user.id, session)
-    await session.commit()
+    # session.commit() is owned by get_session — no explicit commit needed here.
 
-    # Broadcast real-time participant:joined event to all connected clients in the room
+    # Broadcast real-time participant:joined event to all connected clients.
+    # Include room_status so the host's store can transition waiting→active
+    # without needing a page refresh.
+    from app.rooms.models import Room
+    room = await session.get(Room, participant.room_id)
+    room_status = room.status.value if room else None
+
     await connection_manager.broadcast_to_room(
         str(participant.room_id),
         "participant:joined",
-        participant.model_dump(mode="json"),
+        {**participant.model_dump(mode="json"), "room_status": room_status},
     )
 
     return participant
@@ -64,7 +70,7 @@ async def leave_room_endpoint(
 ) -> None:
     """Remove the current user from a room and notify all clients."""
     participant_id = await leave_room(room_id, current_user.id, session)
-    await session.commit()
+    # session.commit() owned by get_session
     await connection_manager.broadcast_to_room(
         str(room_id),
         "participant:left",
@@ -92,7 +98,7 @@ async def start_round_endpoint(
     from app.rounds.service import start_round
 
     round_ = await start_round(room_id, current_user.id, session)
-    await session.commit()
+    # session.commit() owned by get_session
     await connection_manager.broadcast_to_room(
         str(room_id),
         "round:started",
@@ -109,7 +115,7 @@ async def complete_room_endpoint(
 ) -> None:
     """Mark a room as completed and broadcast to all clients (host only)."""
     await complete_room_service(room_id, current_user.id, session)
-    await session.commit()
+    # session.commit() owned by get_session
     await connection_manager.broadcast_to_room(
         str(room_id),
         "room:completed",
