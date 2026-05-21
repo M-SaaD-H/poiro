@@ -92,6 +92,11 @@ export default function BattleRoomPage() {
   const isRoundActive = activeRound?.status === "active";
   const isScoringPhase = activeRound?.status === "scoring";
 
+  // Host sees all submissions; participants only see their own (fair play)
+  const visibleSubmissions = isHost
+    ? submissions
+    : submissions.filter((s) => s.participant_id === currentParticipant?.id);
+
   // ── Completed / Leaderboard view ──────────────────────────────────────────
   if (isCompleted) {
     return (
@@ -260,10 +265,10 @@ export default function BattleRoomPage() {
               </div>
             )}
 
-            {/* Submission Feed — visible to all users once there are submissions */}
-            {(isRoundActive || isScoringPhase || submissions.length > 0) && (
+            {/* Submission Feed — host sees all, participants see only their own */}
+            {(isRoundActive || isScoringPhase || visibleSubmissions.length > 0) && (
               <SubmissionFeed
-                submissions={submissions}
+                submissions={visibleSubmissions}
                 jobs={jobs}
                 participants={participants}
                 currentUserId={user?.id || ""}
